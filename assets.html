@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Assets — MaintainIQ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> MaintainIQ</div>
+    <div class="tagline">Scan. Report. Diagnose. Maintain.</div>
+    <nav>
+      <a href="dashboard.html">📊 Dashboard</a>
+      <a href="assets.html" class="active">🗂️ Assets</a>
+      <a href="issues.html">🛠️ Issues</a>
+    </nav>
+    <div class="foot">
+      <div id="whoami" class="mb-2 text-white-50"></div>
+      <button onclick="logout()">Sign out →</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <div class="eyebrow">Registry</div>
+        <h1 class="fs-3 mb-0">Assets</h1>
+      </div>
+      <button class="btn btn-signal" data-bs-toggle="modal" data-bs-target="#assetModal">+ Register Asset</button>
+    </div>
+
+    <div class="card-mq mb-3 d-flex flex-wrap gap-2 align-items-center">
+      <input type="text" class="form-control" style="max-width:240px" id="searchInput" placeholder="Search name or code…">
+      <select class="form-select" style="max-width:180px" id="statusFilter">
+        <option value="">All statuses</option>
+        <option>Operational</option><option>Issue Reported</option><option>Under Inspection</option>
+        <option>Under Maintenance</option><option>Out of Service</option><option>Retired</option>
+      </select>
+      <select class="form-select" style="max-width:180px" id="categoryFilter"><option value="">All categories</option></select>
+    </div>
+
+    <div id="assetsGrid" class="row g-3"></div>
+  </main>
+</div>
+
+<!-- Add Asset Modal -->
+<div class="modal fade" id="assetModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h5 class="modal-title">Register New Asset</h5>
+        <button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div id="formAlert" class="alert alert-danger d-none py-2 small"></div>
+        <form id="assetForm">
+          <label>Asset name</label>
+          <input class="form-control mb-3" id="a_name" required placeholder="Classroom Projector 01">
+          <div class="row">
+            <div class="col-6">
+              <label>Category</label>
+              <input class="form-control mb-3" id="a_category" required placeholder="Electronics">
+            </div>
+            <div class="col-6">
+              <label>Location</label>
+              <input class="form-control mb-3" id="a_location" required placeholder="Room 204">
+            </div>
+          </div>
+          <div class="row">
+            <div class="col-6">
+              <label>Condition</label>
+              <select class="form-select mb-3" id="a_condition">
+                <option>Good</option><option>Fair</option><option>Poor</option>
+              </select>
+            </div>
+            <div class="col-6">
+              <label>Next service date</label>
+              <input type="date" class="form-control mb-3" id="a_next_service">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-mq w-100" id="saveAssetBtn">Register Asset & Generate QR</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="js/supabase-client.js"></script>
+<script>
+let ALL_ASSETS = [];
+
+async function loadAssets() {
+  const { data, error } = await sb.from("assets").select("*").order("created_at", { ascending: false });
+  if (error) { console.error(error); return; }
+  ALL_ASSETS = data;
+  const cats = [...new Set(data.map(a => a.category))];
+  const catSel = document.getElementById("categoryFilter");
+  catSel.innerHTML = `<option value="">All categories</option>` + cats.map(c => `<option>${c}</option>`).join("");
+  render();
+}
+
+function render() {
+  const q = document.getElementById("searchInput").value.toLowerCase();
+  const status = document.getElementById("statusFilter").value;
+  const cat = document.getElementById("categoryFilter").value;
+
+  const filtered = ALL_ASSETS.filter(a =>
+    (!q || a.name.toLowerCase().includes(q) || a.asset_code.toLowerCase().includes(q)) &&
+    (!status || a.status === status) &&
+    (!cat || a.category === cat)
+  );
+
+  const grid = document.getElementById("assetsGrid");
+  if (!filtered.length) {
+    grid.innerHTML = `<div class="col-12"><div class="empty-state"><div class="icon">🗂️</div>No assets match. Try adjusting filters or register a new asset.</div></div>`;
+    return;
+  }
+  grid.innerHTML = filtered.map(a => `
+    <div class="col-md-4">
+      <a href="asset-details.html?id=${a.id}" class="text-decoration-none text-dark">
+        <div class="asset-tag h-100">
+          <div class="code">${a.asset_code}</div>
+          <h3>${a.name}</h3>
+          <div class="meta">📍 ${a.location}</div>
+          <div class="meta">🏷️ ${a.category}</div>
+          <div class="mt-3 d-flex justify-content-between align-items-center">
+            <span class="tag ${statusTagClass(a.status)}">${a.status}</span>
+            <span class="small text-muted">Cond: ${a.condition}</span>
+          </div>
+        </div>
+      </a>
+    </div>`).join("");
+}
+
+document.getElementById("searchInput").addEventListener("input", render);
+document.getElementById("statusFilter").addEventListener("change", render);
+document.getElementById("categoryFilter").addEventListener("change", render);
+
+document.getElementById("assetForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById("saveAssetBtn");
+  const alertBox = document.getElementById("formAlert");
+  alertBox.classList.add("d-none");
+  btn.disabled = true; btn.textContent = "Registering…";
+
+  const profile = await getCurrentProfile();
+  const { data: codeData } = await sb.rpc("next_asset_code");
+
+  const payload = {
+    asset_code: codeData,
+    name: document.getElementById("a_name").value.trim(),
+    category: document.getElementById("a_category").value.trim(),
+    location: document.getElementById("a_location").value.trim(),
+    condition: document.getElementById("a_condition").value,
+    next_service_date: document.getElementById("a_next_service").value || null,
+    created_by: profile.id,
+    status: "Operational"
+  };
+
+  const { data: asset, error } = await sb.from("assets").insert(payload).select().single();
+
+  if (error) {
+    alertBox.textContent = error.message.includes("duplicate") ? "That asset code already exists — try again." : error.message;
+    alertBox.classList.remove("d-none");
+    btn.disabled = false; btn.textContent = "Register Asset & Generate QR";
+    return;
+  }
+
+  await logHistory(asset.id, profile.full_name, "Asset registered", `${asset.name} added to registry`);
+  window.location.href = `asset-details.html?id=${asset.id}`;
+});
+
+(async function init() {
+  const session = await requireAuth();
+  if (!session) return;
+  const profile = await getCurrentProfile();
+  document.getElementById("whoami").textContent = `${profile.full_name} · ${profile.role}`;
+  await loadAssets();
+
+  if (new URLSearchParams(location.search).get("new") === "1") {
+    new bootstrap.Modal(document.getElementById("assetModal")).show();
+  }
+})();
+</script>
+</body>
+</html>

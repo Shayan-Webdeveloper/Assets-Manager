@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Issue Details — MaintainIQ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> MaintainIQ</div>
+    <div class="tagline">Scan. Report. Diagnose. Maintain.</div>
+    <nav>
+      <a href="dashboard.html">📊 Dashboard</a>
+      <a href="assets.html">🗂️ Assets</a>
+      <a href="issues.html" class="active">🛠️ Issues</a>
+    </nav>
+    <div class="foot">
+      <div id="whoami" class="mb-2 text-white-50"></div>
+      <button onclick="logout()">Sign out →</button>
+    </div>
+  </aside>
+
+  <main class="main" id="mainContent" style="display:none">
+    <div class="topbar">
+      <div>
+        <div class="eyebrow" id="issueNum">—</div>
+        <h1 class="fs-3 mb-0" id="issueTitle">—</h1>
+      </div>
+      <div class="d-flex gap-2">
+        <span class="tag" id="priorityTag"></span>
+        <span class="tag" id="statusTag"></span>
+      </div>
+    </div>
+
+    <div id="recurringWarning" class="alert alert-warning small d-none"></div>
+    <div id="criticalNote" class="alert alert-danger small d-none"></div>
+
+    <div class="row g-3">
+      <div class="col-lg-7">
+        <div class="card-mq mb-3">
+          <h2 class="fs-6 fw-bold mb-2">Reported Complaint</h2>
+          <p class="small mb-2" id="issueDescription"></p>
+          <div class="small text-muted">Reported by <span id="reporterName"></span> on <span id="reportedDate"></span> · Asset: <a id="assetLink" href="#"></a></div>
+        </div>
+
+        <div class="card-mq mb-3" id="aiBlockWrap" style="display:none">
+          <div class="ai-block">
+            <div class="ai-eyebrow">🤖 AI Triage Suggestion (at time of reporting)</div>
+            <div class="field"><div class="k">Category</div><div class="v" id="ai_category"></div></div>
+            <div class="field"><div class="k">Possible causes</div><div class="v" id="ai_causes"></div></div>
+            <div class="field mb-0"><div class="k">Initial checks</div><div class="v" id="ai_checks"></div></div>
+          </div>
+        </div>
+
+        <div class="card-mq">
+          <h2 class="fs-6 fw-bold mb-3">Maintenance Record</h2>
+          <div id="maintenanceList" class="mb-3"></div>
+
+          <div id="maintenanceFormWrap">
+            <label>Inspection / work notes</label>
+            <textarea class="form-control mb-2" id="m_notes" rows="3" placeholder="Inspected unit, found damaged HDMI cable…"></textarea>
+            <div class="row">
+              <div class="col-6"><label>Parts used (optional)</label><input class="form-control mb-2" id="m_parts" placeholder="HDMI cable"></div>
+              <div class="col-6"><label>Cost</label><input type="number" min="0" step="0.01" class="form-control mb-2" id="m_cost" value="0"></div>
+            </div>
+            <button class="btn btn-outline-mq" id="addNoteBtn">+ Add Maintenance Note</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-5">
+        <div class="card-mq mb-3">
+          <h2 class="fs-6 fw-bold mb-3">Workflow</h2>
+          <label>Assign to technician</label>
+          <select class="form-select mb-3" id="assignSelect"><option value="">— Unassigned —</option></select>
+          <div id="workflowActions" class="d-grid gap-2"></div>
+        </div>
+
+        <div class="card-mq">
+          <h2 class="fs-6 fw-bold mb-3">Asset History</h2>
+          <div id="historyTimeline" class="timeline"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-client.js"></script>
+<script src="js/ai-triage.js"></script>
+<script>
+const ISSUE_ID = new URLSearchParams(location.search).get("id");
+let ISSUE = null, ASSET = null, PROFILE = null;
+
+const STATUS_ACTIONS = {
+  "Reported": [{ to: "Assigned", label: "Confirm Assignment" }],
+  "Assigned": [{ to: "Inspection Started", label: "Start Inspection" }],
+  "Inspection Started": [
+    { to: "Maintenance In Progress", label: "Begin Maintenance" },
+    { to: "Waiting for Parts", label: "Mark Waiting for Parts" }
+  ],
+  "Maintenance In Progress": [
+    { to: "Waiting for Parts", label: "Mark Waiting for Parts" },
+    { to: "Resolved", label: "Resolve Issue", requiresNote: true }
+  ],
+  "Waiting for Parts": [{ to: "Maintenance In Progress", label: "Resume Maintenance" }],
+  "Resolved": [{ to: "Closed", label: "Close Issue" }, { to: "Reopened", label: "Reopen Issue" }],
+  "Closed": [{ to: "Reopened", label: "Reopen Issue" }],
+  "Reopened": [{ to: "Assigned", label: "Reassign" }]
+};
+
+const ASSET_STATUS_MAP = {
+  "Assigned": null,
+  "Inspection Started": "Under Inspection",
+  "Maintenance In Progress": "Under Maintenance",
+  "Resolved": "Operational",
+  "Waiting for Parts": "Under Maintenance",
+  "Reopened": "Issue Reported"
+};
+
+async function loadTechnicians() {
+  const { data } = await sb.from("profiles").select("*").eq("role", "technician");
+  const sel = document.getElementById("assignSelect");
+  (data || []).forEach(t => {
+    const opt = document.createElement("option");
+    opt.value = t.id; opt.textContent = t.full_name;
+    sel.appendChild(opt);
+  });
+}
+
+async function loadIssue() {
+  const { data: issue } = await sb.from("issues").select("*").eq("id", ISSUE_ID).single();
+  if (!issue) { alert("Issue not found."); location.href = "issues.html"; return; }
+  ISSUE = issue;
+  const { data: asset } = await sb.from("assets").select("*").eq("id", issue.asset_id).single();
+  ASSET = asset;
+
+  document.getElementById("issueNum").textContent = issue.issue_number;
+  document.getElementById("issueTitle").textContent = issue.title;
+  document.getElementById("priorityTag").textContent = issue.priority;
+  document.getElementById("priorityTag").className = "tag " + priorityTagClass(issue.priority);
+  document.getElementById("statusTag").textContent = issue.status;
+  document.getElementById("statusTag").className = "tag " + statusTagClass(issue.status);
+  document.getElementById("issueDescription").textContent = issue.description;
+  document.getElementById("reporterName").textContent = issue.reporter_name || "—";
+  document.getElementById("reportedDate").textContent = fmtDate(issue.created_at);
+  document.getElementById("assetLink").textContent = `${asset.name} (${asset.asset_code})`;
+  document.getElementById("assetLink").href = `asset-details.html?id=${asset.id}`;
+  document.getElementById("assignSelect").value = issue.assigned_to || "";
+
+  if (issue.priority === "Critical") {
+    document.getElementById("criticalNote").classList.remove("d-none");
+    document.getElementById("criticalNote").textContent = "⚠️ Critical priority — recommend an immediate qualified-technician response.";
+  }
+
+  if (issue.ai_suggested) {
+    document.getElementById("aiBlockWrap").style.display = "block";
+    document.getElementById("ai_category").textContent = issue.ai_suggested.category || "—";
+    document.getElementById("ai_causes").textContent = (issue.ai_suggested.possible_causes || []).join(", ") || "—";
+    document.getElementById("ai_checks").textContent = (issue.ai_suggested.initial_checks || []).join(" · ") || "—";
+  }
+
+  // recurring pattern check
+  const { data: priorIssues } = await sb.from("issues").select("category, created_at").eq("asset_id", asset.id).neq("id", issue.id);
+  const warning = checkRecurringPattern(priorIssues, issue.category);
+  if (warning) {
+    document.getElementById("recurringWarning").classList.remove("d-none");
+    document.getElementById("recurringWarning").textContent = "🔁 " + warning;
+  }
+
+  renderWorkflowActions();
+  document.getElementById("mainContent").style.display = "block";
+}
+
+function renderWorkflowActions() {
+  const wrap = document.getElementById("workflowActions");
+  const actions = STATUS_ACTIONS[ISSUE.status] || [];
+  if (!actions.length) { wrap.innerHTML = `<div class="small text-muted">No further actions available.</div>`; return; }
+  wrap.innerHTML = actions.map(a =>
+    `<button class="btn ${a.to === 'Resolved' ? 'btn-signal' : 'btn-outline-mq'}" onclick="transition('${a.to}', ${!!a.requiresNote})">${a.label}</button>`
+  ).join("");
+}
+
+async function transition(newStatus, requiresNote) {
+  if (requiresNote) {
+    const { data: records } = await sb.from("maintenance_records").select("id").eq("issue_id", ISSUE_ID);
+    if (!records || !records.length) {
+      alert("Add at least one maintenance note before resolving this issue.");
+      return;
+    }
+  }
+  const oldStatus = ISSUE.status;
+  await sb.from("issues").update({ status: newStatus }).eq("id", ISSUE_ID);
+  ISSUE.status = newStatus;
+  document.getElementById("statusTag").textContent = newStatus;
+  document.getElementById("statusTag").className = "tag " + statusTagClass(newStatus);
+  await logHistory(ASSET.id, PROFILE.full_name, `Issue ${oldStatus} → ${newStatus}`, ISSUE.issue_number, ISSUE_ID);
+
+  const mappedAssetStatus = ASSET_STATUS_MAP[newStatus];
+  if (mappedAssetStatus) {
+    const updates = { status: mappedAssetStatus };
+    if (mappedAssetStatus === "Operational") updates.last_service_date = new Date().toISOString().slice(0, 10);
+    await sb.from("assets").update(updates).eq("id", ASSET.id);
+  }
+  renderWorkflowActions();
+  loadHistory();
+}
+
+document.getElementById("assignSelect").addEventListener("change", async (e) => {
+  const techId = e.target.value || null;
+  await sb.from("issues").update({ assigned_to: techId }).eq("id", ISSUE_ID);
+  const techName = e.target.selectedOptions[0]?.textContent || "Unassigned";
+  await logHistory(ASSET.id, PROFILE.full_name, "Technician assigned", techName, ISSUE_ID);
+  if (ISSUE.status === "Reported") transition("Assigned", false);
+  loadHistory();
+});
+
+document.getElementById("addNoteBtn").addEventListener("click", async () => {
+  const notes = document.getElementById("m_notes").value.trim();
+  const cost = parseFloat(document.getElementById("m_cost").value || "0");
+  if (!notes) { alert("Add a note describing the work performed."); return; }
+  if (cost < 0) { alert("Cost cannot be negative."); return; }
+
+  await sb.from("maintenance_records").insert({
+    issue_id: ISSUE_ID, technician_id: PROFILE.id, notes,
+    parts_used: document.getElementById("m_parts").value.trim() || null, cost
+  });
+  await logHistory(ASSET.id, PROFILE.full_name, "Maintenance note added", notes.slice(0, 60), ISSUE_ID);
+  document.getElementById("m_notes").value = "";
+  document.getElementById("m_parts").value = "";
+  document.getElementById("m_cost").value = "0";
+  loadMaintenance(); loadHistory();
+});
+
+async function loadMaintenance() {
+  const { data } = await sb.from("maintenance_records").select("*, profiles(full_name)").eq("issue_id", ISSUE_ID).order("created_at", { ascending: false });
+  const el = document.getElementById("maintenanceList");
+  if (!data?.length) { el.innerHTML = `<div class="small text-muted mb-2">No maintenance notes yet.</div>`; return; }
+  el.innerHTML = data.map(m => `
+    <div class="border-bottom py-2">
+      <div class="small">${m.notes}</div>
+      <div class="small text-muted">${m.parts_used ? "Parts: " + m.parts_used + " · " : ""}Cost: $${Number(m.cost).toFixed(2)} · ${m.profiles?.full_name ?? "—"} · ${fmtDate(m.created_at)}</div>
+    </div>`).join("");
+}
+
+async function loadHistory() {
+  const { data } = await sb.from("asset_history").select("*").eq("issue_id", ISSUE_ID).order("created_at", { ascending: false });
+  const el = document.getElementById("historyTimeline");
+  if (!data?.length) { el.innerHTML = `<div class="empty-state py-3"><div class="icon">🕘</div>No activity yet.</div>`; return; }
+  el.innerHTML = data.map(h => `
+    <div class="timeline-item">
+      <div class="when">${fmtDate(h.created_at)}</div>
+      <div class="what">${h.action}</div>
+      <div class="who">by ${h.actor_name}${h.details ? " — " + h.details : ""}</div>
+    </div>`).join("");
+}
+
+(async function init() {
+  const session = await requireAuth();
+  if (!session) return;
+  PROFILE = await getCurrentProfile();
+  document.getElementById("whoami").textContent = `${PROFILE.full_name} · ${PROFILE.role}`;
+  if (!ISSUE_ID) { location.href = "issues.html"; return; }
+  await loadTechnicians();
+  await loadIssue();
+  await loadMaintenance();
+  await loadHistory();
+})();
+</script>
+</body>
+</html>
