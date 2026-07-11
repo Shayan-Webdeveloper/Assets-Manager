@@ -58,7 +58,10 @@ document.getElementById("regForm").addEventListener("submit", async (e) => {
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
 
-  const { data, error } = await sb.auth.signUp({ email, password });
+const { data, error } = await sb.auth.signUp({
+  email,
+  password
+});
 
   if (error) {
     alertBox.textContent = error.message;
@@ -68,9 +71,13 @@ document.getElementById("regForm").addEventListener("submit", async (e) => {
   }
 
   // Create the profile row (role lives here, not in auth.users)
-  if (data.user) {
-    await sb.from("profiles").insert({ id: data.user.id, full_name, role });
-  }
+if (data.user) {
+  await sb.from("profiles").insert({
+    id: data.user.id,
+    full_name,
+    role
+  });
+}
 
   successBox.textContent = "Account created. If email confirmation is enabled on your project, check your inbox — otherwise you can sign in now.";
   successBox.classList.remove("d-none");
