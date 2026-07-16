@@ -9,16 +9,20 @@
 <link href="css/style.css" rel="stylesheet">
 </head>
 <body>
+<button class="menu-btn" onclick="toggleSidebar()">
+  ☰
+</button>
 
+<div class="overlay" onclick="toggleSidebar()"></div>
 <div class="app-shell">
   <aside class="sidebar" id="sidebar">
     <div class="brand"><span class="dot"></span> MaintainIQ</div>
     <div class="tagline">Scan. Report. Diagnose. Maintain.</div>
     <nav>
-      <a href="dashboard.html" class="active">📊 Dashboard</a>
-      <a href="assets.html">🗂️ Assets</a>
-      <a href="issues.html">🛠️ Issues</a>
-    </nav>
+    <a href="dashboard.html" class="active" onclick="closeSidebar()">📊 Dashboard</a>
+    <a href="assets.html" onclick="closeSidebar()">🗂️ Assets</a>
+    <a href="issues.html" onclick="closeSidebar()">🛠️ Issues</a>
+</nav>
     <div class="foot">
       <div id="whoami" class="mb-2 text-white-50"></div>
       <button onclick="logout()">Sign out →</button>
@@ -120,6 +124,16 @@
       </div>`).join("");
   }
 })();
+function toggleSidebar() {
+    document.getElementById("sidebar").classList.toggle("open");
+    document.querySelector(".overlay").classList.toggle("show");
+}
+function closeSidebar() {
+    if (window.innerWidth <= 900) {
+        document.getElementById("sidebar").classList.remove("open");
+        document.querySelector(".overlay").classList.remove("show");
+    }
+}
 </script>
 </body>
 </html>

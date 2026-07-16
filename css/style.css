@@ -614,3 +614,61 @@ label {
     padding: 20px;
   }
 }
+.menu-btn{
+    display:none;
+}
+
+.overlay{
+    display:none;
+}
+
+@media (max-width:900px){
+
+    .menu-btn{
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        position:fixed;
+        top:15px;
+        left:15px;
+        width:45px;
+        height:45px;
+        border:none;
+        border-radius:8px;
+        background:var(--signal);
+        color:var(--ink);
+        font-size:24px;
+        cursor:pointer;
+        z-index:1001;
+    }
+
+    .sidebar{
+        position:fixed;
+        top:0;
+        left:-240px;
+        width:240px;
+        height:100vh;
+        z-index:1002;
+        transition:left .3s ease;
+    }
+
+    .sidebar.open{
+        left:0;
+    }
+
+    .overlay{
+        position:fixed;
+        inset:0;
+        background:rgba(0,0,0,.45);
+        z-index:1000;
+    }
+
+    .overlay.show{
+        display:block;
+    }
+
+    .main{
+        margin-left:0;
+        padding-top:75px;
+    }
+}
